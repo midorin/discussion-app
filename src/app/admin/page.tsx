@@ -1,17 +1,43 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 
+// ここを好きなパスワードに変えてOK
+const ADMIN_PASSWORD = 'idea3reason'
+
 export default function AdminPage() {
   const router = useRouter()
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [passwordInput, setPasswordInput] = useState('')
+  const [passwordError, setPasswordError] = useState('')
+
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [deadline, setDeadline] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState('')
+
+  // ページを開いたときに、すでに認証済みか確認
+  useEffect(() => {
+    const saved = sessionStorage.getItem('admin_authenticated')
+    if (saved === 'true') {
+      setIsAuthenticated(true)
+    }
+  }, [])
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (passwordInput === ADMIN_PASSWORD) {
+      setIsAuthenticated(true)
+      sessionStorage.setItem('admin_authenticated', 'true')
+      setPasswordError('')
+    } else {
+      setPasswordError('パスワードが違います')
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -40,7 +66,6 @@ export default function AdminPage() {
       setDescription('')
       setDeadline('')
       
-      // 2秒後にホームに戻る
       setTimeout(() => {
         router.push('/')
       }, 1500)
@@ -49,6 +74,43 @@ export default function AdminPage() {
     setSubmitting(false)
   }
 
+  // まだ認証されていない場合はパスワード入力画面
+  if (!isAuthenticated) {
+    return (
+      <main className="min-h-screen bg-gray-50 p-4 md:p-8 flex items-center justify-center">
+        <div className="max-w-sm w-full bg-white p-6 rounded-lg shadow">
+          <h1 className="text-xl font-bold mb-4 text-center">管理画面ログイン</h1>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">パスワード</label>
+              <input
+                type="password"
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+                className="w-full border rounded p-2"
+                placeholder="パスワードを入力"
+                required
+              />
+            </div>
+            {passwordError && (
+              <p className="text-red-600 text-sm">{passwordError}</p>
+            )}
+            <button
+              type="submit"
+              className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700"
+            >
+              ログイン
+            </button>
+          </form>
+          <Link href="/" className="block text-center text-sm text-blue-600 mt-4 hover:underline">
+            ホームに戻る
+          </Link>
+        </div>
+      </main>
+    )
+  }
+
+  // 認証後の管理画面
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-8">
       <div className="max-w-lg mx-auto">
@@ -107,10 +169,6 @@ export default function AdminPage() {
             </p>
           )}
         </form>
-
-        <p className="text-xs text-gray-400 mt-4 text-center">
-          ※ プロトタイプのため認証はありません
-        </p>
       </div>
     </main>
   )
