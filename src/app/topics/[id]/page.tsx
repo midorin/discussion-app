@@ -3,7 +3,13 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { type Rebuttal, type ReasonIndex } from '@/lib/rebuttals'
+import {
+  type Rebuttal,
+  type ReasonIndex,
+  validateRebuttalInput,
+  canRebut,
+  isUniqueViolation,
+} from '@/lib/rebuttals'
 import Link from 'next/link'
 
 type Topic = {
@@ -40,6 +46,16 @@ export default function TopicPage() {
   const [reason2, setReason2] = useState('')
   const [reason3, setReason3] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
+  const [rebuttalTarget, setRebuttalTarget] = useState<{
+    postId: string
+    reasonIndex: ReasonIndex
+  } | null>(null)
+  const [rebuttalClaim, setRebuttalClaim] = useState('')
+  const [rebuttalReason1, setRebuttalReason1] = useState('')
+  const [rebuttalReason2, setRebuttalReason2] = useState('')
+  const [rebuttalReason3, setRebuttalReason3] = useState('')
+  const [rebuttalSubmitting, setRebuttalSubmitting] = useState(false)
 
   useEffect(() => {
     // ニックネームをlocalStorageから取得
@@ -124,6 +140,70 @@ export default function TopicPage() {
     setSubmitting(false)
   }
 
+  const handleRebuttalSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!rebuttalTarget) return
+
+    const post = posts.find((p) => p.id === rebuttalTarget.postId)
+    if (!post) return
+
+    const validationError = validateRebuttalInput({
+      nickname,
+      claim: rebuttalClaim,
+      reason1: rebuttalReason1,
+      reason2: rebuttalReason2,
+      reason3: rebuttalReason3,
+      reason_index: rebuttalTarget.reasonIndex,
+    })
+    if (validationError) {
+      alert(validationError)
+      return
+    }
+
+    if (nickname.trim() === post.nickname.trim()) {
+      alert('自分の投稿には反論できません')
+      return
+    }
+
+    setRebuttalSubmitting(true)
+    localStorage.setItem('nickname', nickname)
+
+    const { error } = await supabase.from('rebuttals').insert({
+      post_id: rebuttalTarget.postId,
+      reason_index: rebuttalTarget.reasonIndex,
+      nickname,
+      claim: rebuttalClaim,
+      reason1: rebuttalReason1,
+      reason2: rebuttalReason2,
+      reason3: rebuttalReason3,
+    })
+
+    if (error) {
+      if (isUniqueViolation(error)) {
+        alert('すでにこの理由に反論済みです')
+      } else {
+        alert('反論の投稿に失敗しました')
+        console.error(error)
+      }
+    } else {
+      setRebuttalClaim('')
+      setRebuttalReason1('')
+      setRebuttalReason2('')
+      setRebuttalReason3('')
+      setRebuttalTarget(null)
+
+      const postIds = posts.map((p) => p.id)
+      const { data } = await supabase
+        .from('rebuttals')
+        .select('*')
+        .in('post_id', postIds)
+        .order('created_at', { ascending: true })
+      setRebuttals((data || []) as Rebuttal[])
+    }
+
+    setRebuttalSubmitting(false)
+  }
+
   function rebuttalsFor(postId: string, reasonIndex: ReasonIndex) {
     return rebuttals.filter(
       (r) => r.post_id === postId && r.reason_index === reasonIndex,
@@ -188,6 +268,34 @@ export default function TopicPage() {
                             ))}
                           </div>
                         )}
+                        {canRebut({
+                          viewerNickname: nickname,
+                          postNickname: post.nickname,
+                          existingRebuttals: rebuttals.filter((r) => r.post_id === post.id),
+                          reasonIndex: idx,
+                        }) ? (
+                          <button
+                            type="button"
+                            className="text-xs text-blue-600 mt-1"
+                            onClick={() => {
+                              setShowForm(false)
+                              setRebuttalTarget({ postId: post.id, reasonIndex: idx })
+                            }}
+                          >
+                            この理由に反論
+                          </button>
+                        ) : (
+                          nickname.trim() !== '' &&
+                          nickname.trim() !== post.nickname.trim() &&
+                          rebuttals.some(
+                            (r) =>
+                              r.post_id === post.id &&
+                              r.reason_index === idx &&
+                              r.nickname.trim() === nickname.trim(),
+                          ) && (
+                            <span className="text-xs text-gray-400 mt-1">反論済み</span>
+                          )
+                        )}
                       </div>
                     )
                   })}
@@ -197,8 +305,85 @@ export default function TopicPage() {
           )}
         </div>
 
+        {/* 反論フォーム */}
+        {rebuttalTarget && (
+          <div className="bg-white p-5 rounded-lg shadow fixed bottom-0 left-0 right-0 md:static max-w-2xl mx-auto">
+            <h3 className="font-bold mb-4">
+              理由{rebuttalTarget.reasonIndex}への反論
+            </h3>
+            <form onSubmit={handleRebuttalSubmit} className="space-y-3">
+              <div>
+                <label className="text-sm font-medium">ニックネーム</label>
+                <input
+                  type="text"
+                  value={nickname}
+                  onChange={(e) => setNickname(e.target.value)}
+                  className="w-full border rounded p-2 mt-1"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">反対の主張</label>
+                <textarea
+                  value={rebuttalClaim}
+                  onChange={(e) => setRebuttalClaim(e.target.value)}
+                  className="w-full border rounded p-2 mt-1"
+                  rows={2}
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">理由1（必須）</label>
+                <textarea
+                  value={rebuttalReason1}
+                  onChange={(e) => setRebuttalReason1(e.target.value)}
+                  className="w-full border rounded p-2 mt-1"
+                  rows={2}
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">理由2（必須）</label>
+                <textarea
+                  value={rebuttalReason2}
+                  onChange={(e) => setRebuttalReason2(e.target.value)}
+                  className="w-full border rounded p-2 mt-1"
+                  rows={2}
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">理由3（必須）</label>
+                <textarea
+                  value={rebuttalReason3}
+                  onChange={(e) => setRebuttalReason3(e.target.value)}
+                  className="w-full border rounded p-2 mt-1"
+                  rows={2}
+                  required
+                />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setRebuttalTarget(null)}
+                  className="flex-1 border rounded py-2"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="submit"
+                  disabled={rebuttalSubmitting}
+                  className="flex-1 bg-blue-600 text-white rounded py-2 disabled:opacity-50"
+                >
+                  {rebuttalSubmitting ? '投稿中...' : '反論する'}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
         {/* 投稿フォーム */}
-        {showForm ? (
+        {!rebuttalTarget && showForm ? (
           <div className="bg-white p-5 rounded-lg shadow fixed bottom-0 left-0 right-0 md:static md:bottom-auto max-w-2xl mx-auto">
             <h3 className="font-bold mb-4">意見を書く</h3>
             <form onSubmit={handleSubmit} className="space-y-3">
@@ -270,14 +455,17 @@ export default function TopicPage() {
               </div>
             </form>
           </div>
-        ) : (
+        ) : !rebuttalTarget ? (
           <button
-            onClick={() => setShowForm(true)}
+            onClick={() => {
+              setRebuttalTarget(null)
+              setShowForm(true)
+            }}
             className="fixed bottom-6 right-6 bg-blue-600 text-white px-6 py-3 rounded-full shadow-lg hover:bg-blue-700"
           >
             意見を書く
           </button>
-        )}
+        ) : null}
       </div>
     </main>
   )
