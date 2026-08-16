@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { type Rebuttal, type ReasonIndex } from '@/lib/rebuttals'
 import Link from 'next/link'
 
 type Topic = {
@@ -28,6 +29,7 @@ export default function TopicPage() {
 
   const [topic, setTopic] = useState<Topic | null>(null)
   const [posts, setPosts] = useState<Post[]>([])
+  const [rebuttals, setRebuttals] = useState<Rebuttal[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
 
@@ -57,8 +59,20 @@ export default function TopicPage() {
         .eq('topic_id', topicId)
         .order('created_at', { ascending: false })
 
+      const postIds = (postsData || []).map((p) => p.id)
+      let rebuttalsData: Rebuttal[] = []
+      if (postIds.length > 0) {
+        const { data } = await supabase
+          .from('rebuttals')
+          .select('*')
+          .in('post_id', postIds)
+          .order('created_at', { ascending: true })
+        rebuttalsData = (data || []) as Rebuttal[]
+      }
+
       setTopic(topicData)
       setPosts(postsData || [])
+      setRebuttals(rebuttalsData)
       setLoading(false)
     }
 
@@ -110,6 +124,12 @@ export default function TopicPage() {
     setSubmitting(false)
   }
 
+  function rebuttalsFor(postId: string, reasonIndex: ReasonIndex) {
+    return rebuttals.filter(
+      (r) => r.post_id === postId && r.reason_index === reasonIndex,
+    )
+  }
+
   if (loading) return <div className="p-8">読み込み中...</div>
   if (!topic) return <div className="p-8">お題が見つかりません</div>
 
@@ -143,10 +163,34 @@ export default function TopicPage() {
                   <span>{new Date(post.created_at).toLocaleString('ja-JP')}</span>
                 </div>
                 <p className="font-medium mb-3">{post.opinion}</p>
-                <div className="space-y-1 text-sm text-gray-700">
-                  <p><span className="font-semibold">理由1:</span> {post.reason1}</p>
-                  <p><span className="font-semibold">理由2:</span> {post.reason2}</p>
-                  <p><span className="font-semibold">理由3:</span> {post.reason3}</p>
+                <div className="text-sm text-gray-700">
+                  {([1, 2, 3] as const).map((idx) => {
+                    const text = idx === 1 ? post.reason1 : idx === 2 ? post.reason2 : post.reason3
+                    const items = rebuttalsFor(post.id, idx)
+                    return (
+                      <div key={idx} className="mt-2">
+                        <p className="text-sm text-gray-700">
+                          <span className="font-semibold">理由{idx}:</span> {text}
+                        </p>
+                        {items.length > 0 && (
+                          <div className="ml-3 mt-2 space-y-2 border-l-2 border-gray-200 pl-3">
+                            {items.map((r) => (
+                              <div key={r.id} className="text-sm">
+                                <div className="flex justify-between text-xs text-gray-500 mb-1">
+                                  <span>{r.nickname}</span>
+                                  <span>{new Date(r.created_at).toLocaleString('ja-JP')}</span>
+                                </div>
+                                <p className="font-medium">{r.claim}</p>
+                                <p>理由1: {r.reason1}</p>
+                                <p>理由2: {r.reason2}</p>
+                                <p>理由3: {r.reason3}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             ))
